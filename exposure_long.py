@@ -5,17 +5,11 @@ import pandas as pd
 import numpy as np
 import sys
 import timeit
+from vars_and_functions import global_vars as gb
 
 ########GLOBAL VARS##########
 
-possible_paths = [R'C:\Users\stupg\Desktop', R'C:\Users\Jon\Desktop', R'C:\Users\jonaur\Desktop']
-for path in possible_paths:
-    if os.path.exists(path):
-        folder = path
-
-
-os.chdir(folder+'\Jon\LUST\out')
-data = folder+'\Jon\LUST\suggestion_03_cut_mod_05_imputed.sav'
+data = gb.folder + 'suggestion_03_cut_mod_05_imputed.sav'
 input_exposure_vars_csv = folder+'\Jon\Lust\input_exposure_vars.csv'
 save_data = 'imputed_long_vars_prime.sav'
 

@@ -1,53 +1,50 @@
-__author__ = 'Jon'
+__author__ = 'Jon Aurell'
+
+import time
+start_time = time.time()
+
+
 """
 Checks availability of variables in dataset and makes new dataset from selection variable and list of variables.
 """
-import  os
+from vars_and_functions import global_vars as gb
+from vars_and_functions import reverse_items
 import spss
 import spssaux
-import itertools
-import csv
 import pandas as pd
-import numpy as np
+import time
 
-### GLOBAL VARS ###
-possible_paths = [R'C:\Users\stupg\Desktop', R'C:\Users\Jon\Desktop', R'C:\Users\jonaur\Desktop']
-for path in possible_paths:
-    if os.path.exists(path):
-        folder = path
-os.chdir(folder + '\Jon\LUST\out')
-#data = folder + '\Jon\LUST\EX2006_long_v3EF_ID.sav' #X6
-data = R'C:\Users\jonaur\Desktop\Jon\LUST\data\EX2004_long_v10EF.sav' #X4
-input_csv = folder + '\Jon\LUST\input_scale.csv'
-save_data = 'EX2004_select_rev.sav'
-missing = ['0','77','88','99']
-prefix, start, stop = 'x4_', 4, 9
-urvalsinfo = 'svar_1', '1'
-version = 'suggestion_03'
-single_items = 'single_item_02'
-columns_to_use = [version,'rename','items']
-#keep_vars = ['ID','x6_1kon'] #X6
-keep_vars = ['Kon','EX2004_id'] #X4
-
-
-### GLOBAL VARS ###
-
+log = gb.folder + 'out/check_variables_log.txt'
+syntax_save = gb.folder + 'out/check_variables.sps'
 
 def main():
-    spssaux.OpenDataFile(data)
+    gb.to_log += """data in = {data_in}
+data out = {data_out}\n\n""".format(data_in=gb.org_data,data_out=gb.select_rev)
+    with open(log, 'w') as out:
+        out.write(gb.to_log)
+    spssaux.OpenDataFile(gb.org_data)
     spss.SetOutput("off")
-    db = pd.DataFrame.from_csv(input_csv)
-    db2 = db.loc[db[version].notnull() | db[single_items].notnull() | db['rename'].notnull() | db['recode'].notnull()]
-    #print(db2['items'].values.tolist())
-    vars = mod_database(db2,prefix,start,stop)
-    spss.Submit(prepare_data(vars))
+    db = pd.DataFrame.from_csv(gb.input_csv)
+    db2 = db.loc[db[gb.version].notnull() | db[gb.single_items].notnull() | db['rename'].notnull() | db['recode'].notnull()]
+    vars, to_log2 = mod_database(db2,gb.prefix,gb.start,gb.stop)
+    cmd = prepare_data(vars)
+    with open(syntax_save, 'w') as out:
+        out.write(cmd)
     list_of_all_vars = vars['items'].values.tolist()
     vars_in_file = spssaux.VariableDict().Variables
-    print(str(len(list_of_all_vars))+' variables extracted.')
-    how_often(vars,vars_in_file,prefix,start,stop)
-    reverse_items(vars)
-
-    spss.Submit(extract_vars(list_of_all_vars,urvalsinfo,save_data,keep_vars))
+    to_log1 = str(len(list_of_all_vars))+' variables extracted.\n'
+    print(to_log1)
+    with open(log,'a') as out:
+        out.write(to_log1)
+    how_often(vars,vars_in_file,gb.prefix,gb.start,gb.stop)
+    reverse_items.main(vars,log,syntax_save)
+    cmd = extract_vars(list_of_all_vars,gb.urvalsinfo,gb.select_rev,gb.keep_vars)
+    with open(syntax_save, 'a') as out:
+        out.write(cmd + '\n')
+    #spss.Submit(cmd)
+    with open(log,'a') as out:
+        out.write(to_log2)
+    print("--- %s seconds ---" % (time.time() - start_time))
 
 
 def recode(db):
@@ -55,7 +52,6 @@ def recode(db):
     db2 = db.loc[db['recode'].notnull()]
     cmd += '\n'.join(['RECODE {var} {recode}.'.format(var=pos[0],recode=pos[1]) for pos in db2[['items','recode']].values.tolist()])
     cmd += '\nEXECUTE.\n'
-    #print(cmd)
     return(cmd)
 
 
@@ -75,13 +71,11 @@ def mod_database(input_scale,prefix,start,stop):
     for i in range(start,stop):
         df = input_scale.reset_index()
         df['time'] = prefix+str(i)
-        for col in columns_to_use:
+        for col in gb.columns_to_use:
             df[col] = prefix + str(i) + df[col]
         df_dict[i] = df
     db = pd.concat(df_dict,ignore_index=True)
     diff_vars = db['items'][~db['items'].isin(vars_in_file)].values.tolist()
-    print('Variables not in file\n'+'\n'.join(diff_vars)+'\n')
-
     db2 = db[db['items'].isin((vars_in_file))]
     spss.Submit(recode(db2))
     rename_db = db2.loc[db['rename'].notnull(),['items','rename']]
@@ -91,68 +85,10 @@ def mod_database(input_scale,prefix,start,stop):
         spss.Submit('RENAME VARIABLES {orgname}={new_name}.\nEXECUTE.'.format(orgname=orgname,new_name=new_name))
     vars_in_file = spssaux.VariableDict().Variables
     diff_vars = db['items'][~db['items'].isin(vars_in_file)].values.tolist()
-    print('Variables not in file\n'+'\n'.join(diff_vars)+'\n')
+    vars_not_in_file = 'Variables not in file\n'+'\n'.join(diff_vars)+'\n'
+    print(str(len(diff_vars)) + ' variables not in file. Check log.txt for specification\n')
     db = db[db['items'].isin((vars_in_file))]
-    return db
-
-
-def reverse_items(db):
-    cmd = ''
-    reverse_list = db.loc[db['reverse'] == 1,['items']].values.tolist()
-    n = 0
-    sdict = spssaux.VariableDict()
-    for item in reverse_list:
-        n += 1
-        cmd += get_reverse(item[0],sdict)
-    spss.Submit(cmd)
-    print(str(n)+' items have been reversed.')
-
-
-def get_reverse(var,sdict):
-    cmd = ''
-    reversed_lables = {}
-    try:
-        labels = sdict[var].ValueLabels
-    except:
-        print(var)
-    key_list = []
-    for key in labels:
-        if 0 < int(key) < 77:
-            key_list.append(int(key))
-    try:
-        sub_val = max(key_list) + 1
-    except:
-        print(var)
-        print(sub_val,max(key_list))
-
-    for label in labels:
-        if label not in missing:
-            rev_val = sub_val - int(label)
-            reversed_lables[str(rev_val)] = labels[label]
-        else:
-            reversed_lables[label] = labels[label]
-    cmd += get_recode_rev(reversed_lables, var, sub_val)
-    return cmd
-
-
-def get_recode_rev(dictionary,var,sub_val):
-    cmd = 'RECODE %s' % var
-    for i in dictionary:
-        if i not in missing:
-            rev_val = sub_val - int(i)
-            cmd += ' (%s=%s)' % (i,str(rev_val))
-    cmd += '.\nEXECUTE.\n'
-    cmd += get_value_label(dictionary,var)
-    return cmd
-
-
-def get_value_label(dictonary,var):
-    cmd = 'VALUE LABELS\n%s\n' % var
-    for i in dictonary:
-        cmd += i + ' ' + "'%s'" % dictonary[i]
-        cmd += ' '
-    cmd += '.\n'
-    return cmd
+    return db, vars_not_in_file
 
 
 def extract_vars(vars,urvalsinfo,save,keep):
@@ -173,7 +109,6 @@ def how_often(var_list,vars_in_file,prefix,start,stop):
     nn = 0
     for var in var_list:
         n = 0
-
         list_of_dict = []
         for x in range(start,stop):
             variable = prefix+str(x)+var
@@ -188,8 +123,10 @@ def how_often(var_list,vars_in_file,prefix,start,stop):
         if not checkEqual1(list_of_dict):
             nn += 1
             print(var)
-    print(str(nn)+' variables have different number of response categories.')
-        #print(var +' ' +str(n))
+    to_log = str(nn)+' variables have different number of response categories.\n'
+    print(to_log)
+    with open(log,'a') as out:
+        out.write(to_log)
 
 
 def checkEqual1(iterator):
